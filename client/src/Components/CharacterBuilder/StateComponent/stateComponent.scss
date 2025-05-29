@@ -1,0 +1,67 @@
+.StateComponent {
+  display: flex;
+  flex-flow: column;
+
+  & > *:last-child {
+    border-bottom: 1px solid rgb(255, 255, 255);
+  }
+
+  &-title {
+    font-family: Stencil Std, fantasy;
+    font-size: x-large;
+    margin-bottom: 10px;
+    color: white;
+    display: flex;
+    flex-flow: row;
+    align-items: end;
+    text-shadow: -2px -2px 4px rgba(255, 255, 255, 0.2), /* Svjetla sjena gore/lijevo */
+               2px 2px 4px rgba(0, 0, 0, 0.3);
+
+    &-price {
+      margin-left: 15px;
+    }
+  }
+  &-levelIndicatorWrap {
+    display: flex;
+    flex-flow: row;
+    align-items: center;
+    margin-bottom: 5px;
+
+    & > *:first-child {
+      margin-right: 15px;
+    }
+
+    & > *:last-child {
+      margin-left: 15px;
+    }
+  }
+
+  &-levelIndicator {
+    width: 10px;
+    height: 25px;
+    margin: 0px 3px;
+    border-radius: 3px;
+    transform: skew(-25deg);
+    transition: background-color 0.2s ease-in-out;
+  }
+
+  &-button {
+    font-size: 25px;
+    transition: color 0.2s ease-in-out;
+
+    &:hover {
+      color: rgb(137, 134, 134);
+    }
+  }
+
+  &-description {
+    margin-bottom: 20px;
+    font-weight: 500;
+    padding-bottom: 2px;
+  }
+
+  &-points {
+    font-weight: 700;
+    padding-top: 5px;
+  }
+}

@@ -1,0 +1,13 @@
+.HealthBar {
+  width: 100%;
+  background-color: #ddd;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid white;
+  box-shadow: 8px 8px 20px rgba(0, 0, 0, 0.4);
+
+  &-progres {
+    height: 20px;
+    transition: width 0.7s ease-in-out, background-color 0.7s ease-in-out;
+  }
+}

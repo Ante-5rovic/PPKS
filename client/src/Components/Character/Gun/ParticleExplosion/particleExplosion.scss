@@ -1,0 +1,13 @@
+.ParticleExplosion {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: radial-gradient(circle, orange 0%, red 100%);
+  pointer-events: none;
+  opacity: 0.4;
+  
+  
+}
+
+

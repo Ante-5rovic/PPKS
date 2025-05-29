@@ -1,0 +1,72 @@
+.CharacterBuilder {
+  display: flex;
+  flex-flow: column;
+  justify-content: start;
+  align-items: center;
+  background-color: #ff8a8a;
+  padding: 0px 15px;
+
+  &-header {
+    font-size: 30px;
+    display: flex;
+    flex-flow: row;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 30px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    background-color: #ff8a8a;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+
+    &-currencyWrap{
+        display: flex;
+        flex-flow: row;
+    }
+
+    &-currency {
+      font-size: 30px;
+      margin-right: 15px;
+      font-family: Stencil Std, fantasy;
+      text-shadow: -2px -2px 4px rgba(255, 255, 255, 0.2), /* Svjetla sjena gore/lijevo */
+               2px 2px 4px rgba(0, 0, 0, 0.3);
+
+      &--C{
+        font-size: 32px;
+        color: gold;
+      }
+      &--T{
+        font-size: 32px;
+        color: #A5158C;
+      }
+    }
+
+    &-timer {
+      font-size: 30px;
+      margin-left: 10px;
+      font-family: Stencil Std, fantasy;
+      text-shadow: -2px -2px 4px rgba(255, 255, 255, 0.2), /* Svjetla sjena gore/lijevo */
+               2px 2px 4px rgba(0, 0, 0, 0.3);
+    }
+  }
+
+  &-builder {
+    display: flex;
+    flex-flow: row;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 60px;
+  }
+
+  &-fisical{
+    margin-right: 30px;
+  }
+
+  &-look{
+    position: sticky;
+  top: 60px;
+  align-self: flex-start; // ako koristiš flexbox u parentu
+  z-index: 10; // osiguraj da bude iznad ostalih elemenata ako treba
+  }
+}

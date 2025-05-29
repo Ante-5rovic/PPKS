@@ -1,0 +1,52 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  
+}
+
+h1 {
+  margin: 0;
+  user-select: none; /* Sprječava označavanje teksta */
+  -webkit-user-select: none; /* Za WebKit (Safari, Chrome) */
+  -moz-user-select: none; /* Za Firefox */
+  -ms-user-select: none; /* Za IE/Edge */
+}
+
+h2 {
+  margin: 0;
+  user-select: none; /* Sprječava označavanje teksta */
+  -webkit-user-select: none; /* Za WebKit (Safari, Chrome) */
+  -moz-user-select: none; /* Za Firefox */
+  -ms-user-select: none; /* Za IE/Edge */
+}
+
+span{
+  margin: 0;
+  user-select: none; /* Sprječava označavanje teksta */
+  font-size: 28px;
+  -webkit-user-select: none; /* Za WebKit (Safari, Chrome) */
+  -moz-user-select: none; /* Za Firefox */
+  -ms-user-select: none; /* Za IE/Edge */
+}
+
+p {
+  margin: 0;
+  user-select: none; /* Sprječava označavanje teksta */
+  -webkit-user-select: none; /* Za WebKit (Safari, Chrome) */
+  -moz-user-select: none; /* Za Firefox */
+  -ms-user-select: none; /* Za IE/Edge */
+}

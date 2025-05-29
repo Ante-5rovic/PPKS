@@ -1,0 +1,55 @@
+.Character {
+  position: relative;
+
+  &-guns {
+    display: flex;
+    flex-flow: row;
+    justify-content: space-evenly;
+    transform: translateY(10px);
+    z-index: 0;
+    position: relative;
+  }
+
+  &-body {
+    width: 70px;
+    height: 70px;
+    z-index: 1;
+    position: relative;
+    border-radius: 5px;
+    display: grid;
+    gap: 0px;
+  
+    background: radial-gradient(circle, #4caac1 50%, #7bd3ea 80%);
+  }
+
+  &-gridElement {
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 1px;
+  }
+
+  &-amunitionWrap {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  &-amunition {
+    height: 40px;
+    width: 40px;
+    border-radius: 50px;
+    background-color: #4caac1;
+    display: flex;
+    flex-flow: column;
+    align-items: center;
+    justify-content: center;
+    font-family: Stencil Std, fantasy;
+    font-size: 23px;
+    box-shadow: inset 2px 2px 5px rgba(0, 0, 0, 0.5),
+      inset -2px -2px 5px rgba(255, 255, 255, 0.1);
+    text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.6),
+      0 -1px 1px rgba(255, 255, 255, 0.1), 2px 2px 2px rgba(0, 0, 0, 0.4);
+    background-color: transparent;
+  }
+}
+
