@@ -1,5 +1,3 @@
-// --- START OF FILE Playground.jsx ---
-
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import "./playground.scss";
 import HealthBar from "./HealthBar/HealthBar";
@@ -17,64 +15,85 @@ import {
 const MotionEnabledCharacter = motion(Character);
 
 const Playground = ({
-  characterData: initialCharacterData, // Preimenuj da se ne sukobljava s internal stateom
+  characterData: fullCharacterDataProp, 
   timeLeftInRound,
   sendEventToServer,
   socketId,
-  initialIncomingBullets, // Ovo je niz objekata od servera
-  onClearIncomingBullet, // Funkcija za javljanje Online.jsx da je metak obrađen
+  initialIncomingBullets,
+  onClearIncomingBullet,
+  gameId, 
 }) => {
-  // Interni state za karakteristike koje se mogu mijenjati tijekom igre (HP, štitovi)
-  // Početne vrijednosti se uzimaju iz initialCharacterData
-  const [characterStats, setCharacterStats] = useState(initialCharacterData);
-  const {
-    bodyColor,
-    // healthPoints, // Koristit ćemo currentHP
-    // topShield,    // Koristit ćemo currentTopShield
-    // sideShield,   // Koristit ćemo currentLeft/RightShield
-    guns,
-    dodgeChance,
-    armor,
-    attackPoints,
-    ammunition, // Max ammo po gunu
-    CAModifier,
-    attackSpeed,
-    bulletSpeed,
-    // movemantSpeed, // Koristit ćemo characterStats.movemantSpeed
-  } = characterStats; // Destrukturiraj iz internal statea
-
-  const [currentHP, setCurrentHP] = useState(characterStats.healthPoints);
-  const [currentTopShield, setCurrentTopShield] = useState(characterStats.topShield);
-  const [currentLeftShield, setCurrentLeftShield] = useState(characterStats.sideShield);
-  const [currentRightShield, setCurrentRightShield] = useState(characterStats.sideShield);
-  const [currentAmmo_Play, setCurrentAmmo_Play] = useState(characterStats.ammunition * characterStats.guns);
+  const [characterBaseStats, setCharacterBaseStats] = useState(() => {
+    const { healthPoints, topShield, sideShield, guns, dodgeChance, armor,
+            attackPoints, ammunition, CAModifier, attackSpeed, bulletSpeed, movemantSpeed, bodyColor } = fullCharacterDataProp;
+    return {
+      maxHealthPoints: healthPoints, 
+      maxTopShield: topShield,       
+      maxSideShield: sideShield,     
+      guns, dodgeChance, armor, attackPoints,
+      maxAmmunition: ammunition,     
+      CAModifier, attackSpeed, bulletSpeed, movemantSpeed, bodyColor
+    };
+  });
 
 
-  // Ažuriraj internal state ako se prop initialCharacterData promijeni (npr. rekonekcija)
+  const [currentHP, setCurrentHP] = useState(fullCharacterDataProp.healthPoints); 
+  const [currentTopShield, setCurrentTopShield] = useState(fullCharacterDataProp.topShield); 
+  const [currentLeftShield, setCurrentLeftShield] = useState(fullCharacterDataProp.sideShield); 
+  const [currentRightShield, setCurrentRightShield] = useState(fullCharacterDataProp.sideShield); 
+  const [currentAmmo_Play, setCurrentAmmo_Play] = useState(fullCharacterDataProp.ammunition); 
+
+  const [currentGameId, setCurrentGameId] = useState(null);
+
   useEffect(() => {
-    setCharacterStats(initialCharacterData);
-    setCurrentHP(initialCharacterData.healthPoints);
-    setCurrentTopShield(initialCharacterData.topShield);
-    setCurrentLeftShield(initialCharacterData.sideShield);
-    setCurrentRightShield(initialCharacterData.sideShield);
-    setCurrentAmmo_Play(initialCharacterData.ammunition * initialCharacterData.guns);
-  }, [initialCharacterData]);
+    if (gameId !== currentGameId) {
+        setCurrentGameId(gameId);
+        initializedPositionRef.current = false; 
+
+        const { healthPoints, topShield, sideShield, guns, dodgeChance, armor,
+                attackPoints, ammunition, CAModifier, attackSpeed, bulletSpeed, movemantSpeed, bodyColor } = fullCharacterDataProp;
+        setCharacterBaseStats({
+            maxHealthPoints: healthPoints,
+            maxTopShield: topShield,
+            maxSideShield: sideShield,
+            guns, dodgeChance, armor, attackPoints,
+            maxAmmunition: ammunition,
+            CAModifier, attackSpeed, bulletSpeed, movemantSpeed, bodyColor
+        });
+        setCurrentHP(fullCharacterDataProp.healthPoints);
+        setCurrentTopShield(fullCharacterDataProp.topShield);
+        setCurrentLeftShield(fullCharacterDataProp.sideShield);
+        setCurrentRightShield(fullCharacterDataProp.sideShield);
+        setCurrentAmmo_Play(fullCharacterDataProp.ammunition);
+        return; 
+    }
+
+    setCurrentHP(fullCharacterDataProp.healthPoints);
+    setCurrentTopShield(fullCharacterDataProp.topShield);
+    setCurrentLeftShield(fullCharacterDataProp.sideShield);
+    setCurrentRightShield(fullCharacterDataProp.sideShield);
+    setCurrentAmmo_Play(fullCharacterDataProp.ammunition); 
+
+  }, [fullCharacterDataProp, gameId, currentGameId]); 
 
 
   const playgroundDisplayRef = useRef(null);
   const characterRef = useRef(null);
 
-  const bodySize = 70 + (characterStats.healthPoints || 100) / 30; // Fallback za healthPoints
+  const bodySize = 70 + (characterBaseStats.maxHealthPoints / 30); 
   const totalCharDimensions = useRef({
-    width: bodySize + 2 * ((characterStats.sideShield || 0) * 1.5),
+    width: bodySize + 2 * (characterBaseStats.maxSideShield * 1.5),
     height:
       bodySize +
-      (40 + ((characterStats.bulletSpeed || 1) - 1) * 10) +
-      (10 + (characterStats.topShield || 0)) +
-      Math.max(0, (characterStats.attackPoints || 0) / 10 - 2),
+      (40 + (characterBaseStats.bulletSpeed - 1) * 10) +
+      (10 + characterBaseStats.maxTopShield) + 
+      Math.max(0, (characterBaseStats.attackPoints / 10 - 2)),
   });
 
+
   const [charPosition, setCharPosition] = useState({ x: 0, y: 0 });
+  const initializedPositionRef = useRef(false);
+
   const charRotation = useMotionValue(0);
   const charRotationInverse = useTransform(charRotation, (r) => -r);
   const ROTATION_LERP_FACTOR = 0.08;
@@ -117,42 +136,28 @@ const Playground = ({
   const FRICTION = 0.9;
 
   const transformOrigin = `50% ${
-    (70 + (characterStats.healthPoints || 100) / 30) / 2 +
+    (70 + (characterBaseStats.maxHealthPoints / 30)) / 2 +
     40 +
-    ((characterStats.bulletSpeed || 1) - 1) * 10 +
-    (characterStats.sideShield || 0) * 1.5
+    ((characterBaseStats.bulletSpeed) - 1) * 10 +
+    (characterBaseStats.maxSideShield) * 1.5
   }px`;
 
   useEffect(() => {
     if (characterRef.current) {
-      const attemptUpdateDims = () => {
-        if (characterRef.current) {
-          const width = characterRef.current.offsetWidth;
-          const height = characterRef.current.offsetHeight;
-          if (width > 0 && height > 0) {
-            if (
-              totalCharDimensions.current.width !== width ||
-              totalCharDimensions.current.height !== height
-            ) {
-              totalCharDimensions.current = { width, height };
-            }
-          }
+      const width = characterRef.current.offsetWidth;
+      const height = characterRef.current.offsetHeight;
+      if (width > 0 && height > 0) {
+        if (totalCharDimensions.current.width !== width || totalCharDimensions.current.height !== height) {
+          totalCharDimensions.current = { width, height };
         }
-      };
-      attemptUpdateDims();
-      const timeoutId = setTimeout(attemptUpdateDims, 50);
-      const rafId = requestAnimationFrame(attemptUpdateDims);
-      return () => {
-        clearTimeout(timeoutId);
-        cancelAnimationFrame(rafId);
-      };
+      }
     }
   }, [
-    characterStats.healthPoints,
-    characterStats.sideShield,
-    characterStats.topShield,
-    characterStats.bulletSpeed,
-    characterStats.attackPoints,
+    characterBaseStats.maxHealthPoints,
+    characterBaseStats.maxSideShield,
+    characterBaseStats.maxTopShield,
+    characterBaseStats.bulletSpeed,
+    characterBaseStats.attackPoints,
   ]);
 
   useEffect(() => {
@@ -172,12 +177,23 @@ const Playground = ({
         innerHeight: innerHeight,
       });
 
-      setCharPosition({
-        x: innerWidth / 2 - totalCharDimensions.current.width / 2,
-        y: innerHeight - totalCharDimensions.current.height,
-      });
+      if (!initializedPositionRef.current || gameId !== currentGameId) {
+        setCharPosition({
+          x: innerWidth / 2 - totalCharDimensions.current.width / 2,
+          y: innerHeight - totalCharDimensions.current.height,
+        });
+        initializedPositionRef.current = true;
+      }
     }
-  }, [totalCharDimensions.current.width, totalCharDimensions.current.height]);
+  }, [HARDCODED_WIDTH_OF_PLAYARIA, HARDCODED_HEIGHT_OF_PLAYARIA, gameId, currentGameId, totalCharDimensions.current.width, totalCharDimensions.current.height]);
+
+  useEffect(() => {
+    if (gameId && gameId !== currentGameId) {
+      setCurrentGameId(gameId);
+      initializedPositionRef.current = false;
+    }
+  }, [gameId, currentGameId]);
+
 
   const pressedKeys = useRef({});
 
@@ -192,8 +208,8 @@ const Playground = ({
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("keydown", handleKeyUp);
+      window.removeEventListener("keyup", handleKeyDown);
     };
   }, []);
 
@@ -206,40 +222,46 @@ const Playground = ({
       return;
     }
 
-    const deltaFactor = Math.min(2, delta / 16.67); // Ograniči deltaFactor da spriječi prevelike skokove
-    const currentMoveSpeedStat = characterStats.movemantSpeed || 1.0;
+    const deltaFactor = Math.min(2, delta / 16.67);
+    const currentMoveSpeedStat = characterBaseStats.movemantSpeed;
 
-    if (pressedKeys.current["w"])
-      charVelocity.current.y -= ACCELERATION * currentMoveSpeedStat * deltaFactor;
-    if (pressedKeys.current["s"])
-      charVelocity.current.y += ACCELERATION * currentMoveSpeedStat * deltaFactor;
-    if (pressedKeys.current["a"])
-      charVelocity.current.x -= ACCELERATION * currentMoveSpeedStat * deltaFactor;
-    if (pressedKeys.current["d"])
-      charVelocity.current.x += ACCELERATION * currentMoveSpeedStat * deltaFactor;
+    if (currentMoveSpeedStat > 0) {
+      if (pressedKeys.current["w"])
+        charVelocity.current.y -= ACCELERATION * currentMoveSpeedStat * deltaFactor;
+      if (pressedKeys.current["s"])
+        charVelocity.current.y += ACCELERATION * currentMoveSpeedStat * deltaFactor;
+      if (pressedKeys.current["a"])
+        charVelocity.current.x -= ACCELERATION * currentMoveSpeedStat * deltaFactor;
+      if (pressedKeys.current["d"])
+        charVelocity.current.x += ACCELERATION * currentMoveSpeedStat * deltaFactor;
 
-    if (!pressedKeys.current["w"] && !pressedKeys.current["s"]) {
-      charVelocity.current.y *= Math.pow(FRICTION, deltaFactor);
-    }
-    if (!pressedKeys.current["a"] && !pressedKeys.current["d"]) {
-      charVelocity.current.x *= Math.pow(FRICTION, deltaFactor);
+      if (!pressedKeys.current["w"] && !pressedKeys.current["s"]) {
+        charVelocity.current.y *= Math.pow(FRICTION, deltaFactor);
+      }
+      if (!pressedKeys.current["a"] && !pressedKeys.current["d"]) {
+        charVelocity.current.x *= Math.pow(FRICTION, deltaFactor);
+      }
+
+      charVelocity.current.x = Math.max(
+        -MAX_SPEED * currentMoveSpeedStat,
+        Math.min(charVelocity.current.x, MAX_SPEED * currentMoveSpeedStat)
+      );
+      charVelocity.current.y = Math.max(
+        -MAX_SPEED * currentMoveSpeedStat,
+        Math.min(charVelocity.current.y, MAX_SPEED * currentMoveSpeedStat)
+      );
+
+      if (Math.abs(charVelocity.current.x) < STOP_THRESHOLD && !pressedKeys.current["a"] && !pressedKeys.current["d"]) {
+        charVelocity.current.x = 0;
+      }
+      if (Math.abs(charVelocity.current.y) < STOP_THRESHOLD && !pressedKeys.current["w"] && !pressedKeys.current["s"]) {
+        charVelocity.current.y = 0;
+      }
+    } else {
+        charVelocity.current.x = 0;
+        charVelocity.current.y = 0;
     }
 
-    charVelocity.current.x = Math.max(
-      -MAX_SPEED * currentMoveSpeedStat,
-      Math.min(charVelocity.current.x, MAX_SPEED * currentMoveSpeedStat)
-    );
-    charVelocity.current.y = Math.max(
-      -MAX_SPEED * currentMoveSpeedStat,
-      Math.min(charVelocity.current.y, MAX_SPEED * currentMoveSpeedStat)
-    );
-
-    if (Math.abs(charVelocity.current.x) < STOP_THRESHOLD && !pressedKeys.current["a"] && !pressedKeys.current["d"]) {
-      charVelocity.current.x = 0;
-    }
-    if (Math.abs(charVelocity.current.y) < STOP_THRESHOLD && !pressedKeys.current["w"] && !pressedKeys.current["s"]) {
-      charVelocity.current.y = 0;
-    }
 
     let { x: currentX_leftEdge, y: currentY_topEdge } = charPosition;
     let newX_leftEdge = currentX_leftEdge + charVelocity.current.x * deltaFactor;
@@ -334,29 +356,41 @@ const Playground = ({
         }, intervalTime);
       }
     }, intervalTime);
-  }, []); 
+  }, []);
 
+  const handlePlayerTriggerPull = useCallback(() => {
+    if (currentAmmo_Play <= 0) {
+      console.log("Playground: Nema više metaka za ispaljivanje (client-side check)!");
+      return; 
+    }
+
+    setCurrentAmmo_Play((prev) => prev - 1);
+    console.log(`Playground (${socketId}): Okidač pritisnut. Optimistična municija: ${currentAmmo_Play - 1}`);
+
+    sendEventToServer("player_fired_trigger", { playerId: socketId });
+  }, [currentAmmo_Play, socketId, sendEventToServer]);
+
+
+ 
   const handleShootFromCharacter = useCallback(
-    (newBulletDataFromGun) => {
-      if (currentAmmo_Play > 0) {
-        const bulletToAdd = {
-          id: crypto.randomUUID(),
-          startPositionData: {
-            x: newBulletDataFromGun.position.x - 14,
-            y: newBulletDataFromGun.position.y - 7,
-          },
-          initialRotation: newBulletDataFromGun.rotation,
-          bulletSpeedStat: newBulletDataFromGun.speed, 
-          attackPoints: characterStats.attackPoints, 
-          isOpponentBullet: false,
-          originalShooterId: socketId, 
-        };
-        setBullets((prev) => [...prev, bulletToAdd]);
-        setCurrentAmmo_Play((prev) => prev - 1);
-        startRecoil();
-      }
+    (newBulletDataFromGun, shootSignalValue) => {
+
+      const bulletToAdd = {
+        id: newBulletDataFromGun.id, 
+        startPositionData: {
+          x: newBulletDataFromGun.position.x - 10,
+          y: newBulletDataFromGun.position.y - 7,
+        },
+        initialRotation: newBulletDataFromGun.rotation,
+        bulletSpeedStat: newBulletDataFromGun.speed,
+        attackPoints: characterBaseStats.attackPoints, 
+        isOpponentBullet: false,
+        originalShooterId: socketId,
+      };
+      setBullets((prev) => [...prev, bulletToAdd]);
+      startRecoil();
     },
-    [currentAmmo_Play, characterStats.attackPoints, startRecoil, socketId] 
+    [characterBaseStats.attackPoints, startRecoil, socketId]
   );
 
   useEffect(() => {
@@ -365,6 +399,91 @@ const Playground = ({
       if (recoilDownRef.current) clearInterval(recoilDownRef.current);
     };
   }, []);
+
+  const getCharacterCollisionZones = useCallback(() => {
+    if (!totalCharDimensions.current.width || !playAreaBounds) return null;
+
+    const charX = charPosition.x;
+    const charY = charPosition.y;
+
+    const currentBodySize = 70 + (characterBaseStats.maxHealthPoints / 30);
+    const approxGunActualHeight = 40 + ((characterBaseStats.bulletSpeed) - 1) * 10 + Math.max(0, (characterBaseStats.attackPoints / 10 - 2));
+    const approxGunWrapperTranslateY = 10 + currentTopShield + recoil;
+    const bodyRelativeOffsetY = approxGunActualHeight + approxGunWrapperTranslateY;
+    const bodyRelativeOffsetX = (characterBaseStats.maxSideShield) * 1.5;
+
+    const bodyRect = {
+      x: charX + bodyRelativeOffsetX,
+      y: charY + bodyRelativeOffsetY,
+      width: currentBodySize,
+      height: currentBodySize,
+    };
+
+    const topShieldEffectiveThickness = 5 + currentTopShield * 2;
+    const topShieldZone = currentTopShield > 0 ? {
+      x: bodyRect.x, y: bodyRect.y - topShieldEffectiveThickness,
+      width: currentBodySize, height: topShieldEffectiveThickness,
+    } : null;
+
+    const sideShieldEffectiveThickness = 5 + (characterBaseStats.maxSideShield) * 2;
+    const leftShieldZone = currentLeftShield > 0 ? {
+      x: bodyRect.x - sideShieldEffectiveThickness, y: bodyRect.y,
+      width: sideShieldEffectiveThickness, height: currentBodySize,
+    } : null;
+
+    const rightShieldZone = currentRightShield > 0 ? {
+      x: bodyRect.x + currentBodySize, y: bodyRect.y,
+      width: sideShieldEffectiveThickness, height: currentBodySize,
+    } : null;
+
+    return { bodyZone: bodyRect, topShieldZone, leftShieldZone, rightShieldZone };
+  }, [
+    charPosition, totalCharDimensions.current, characterBaseStats,
+    currentTopShield, currentLeftShield, currentRightShield, recoil, playAreaBounds
+  ]);
+
+  const characterCollisionZones = getCharacterCollisionZones();
+
+  useEffect(() => {
+    if (currentHP <= 0 && socketId && sendEventToServer) {
+      const hasAlreadySentDefeat = localStorage.getItem(`defeat_sent_${socketId}_${currentGameId}`);
+      if (!hasAlreadySentDefeat) {
+        console.log(`PLAYGROUND (${socketId}): HP pao na 0! Javljam serveru.`);
+        sendEventToServer("player_defeated", { playerId: socketId });
+        localStorage.setItem(`defeat_sent_${socketId}_${currentGameId}`, 'true');
+        setTimeout(() => localStorage.removeItem(`defeat_sent_${socketId}_${currentGameId}`), 5000);
+      }
+    }
+  }, [currentHP, socketId, sendEventToServer, currentGameId]);
+
+
+  useEffect(() => {
+    if (initialIncomingBullets && initialIncomingBullets.length > 0 && playAreaBounds) {
+      const bulletsToActuallyAdd = [];
+      initialIncomingBullets.forEach((bulletDataFromServer) => {
+        let incomingX = bulletDataFromServer.xPosition;
+        const newIncomingBullet = {
+          id: bulletDataFromServer.bulletId || crypto.randomUUID(),
+          startPositionData: {
+            x: incomingX,
+            y: 5,
+          },
+          initialRotation: bulletDataFromServer.bulletRotation + 180, // Rotate 180 degrees for incoming bullets
+          bulletSpeedStat: bulletDataFromServer.bulletStats.speed,
+          isOpponentBullet: true,
+          attackPoints: bulletDataFromServer.bulletStats.damage,
+          originalShooterId: bulletDataFromServer.originalShooterId,
+        };
+        bulletsToActuallyAdd.push(newIncomingBullet);
+        if (onClearIncomingBullet) {
+          onClearIncomingBullet(newIncomingBullet.id);
+        }
+      });
+      if (bulletsToActuallyAdd.length > 0) {
+        setBullets((prev) => [...prev, ...bulletsToActuallyAdd]);
+      }
+    }
+  }, [initialIncomingBullets, onClearIncomingBullet, playAreaBounds, socketId]);
 
   const removeBullet = useCallback(
     (
@@ -380,13 +499,13 @@ const Playground = ({
         originalBulletData &&
         !originalBulletData.isOpponentBullet &&
         sendEventToServer &&
-        socketId 
+        socketId
       ) {
         console.log(
           `PLAYGROUND (${socketId}): Moj metak (ID: ${bulletId}) pogodio gornji rub na X: ${impactPosition.x}, šaljem serveru.`
         );
         const bulletPayloadForServer = {
-          originalShooterId: socketId, 
+          originalShooterId: socketId,
           xPosition: impactPosition.x,
           bulletRotation: originalBulletData.initialRotation,
           bulletStats: {
@@ -396,8 +515,8 @@ const Playground = ({
           bulletId: originalBulletData.id,
         };
         sendEventToServer("bullet_fired_at_opponent", bulletPayloadForServer);
-        setBullets((prev) => prev.filter((b) => b.id !== bulletId)); 
-        return; 
+        setBullets((prev) => prev.filter((b) => b.id !== bulletId));
+        return;
       }
 
       if (
@@ -406,205 +525,33 @@ const Playground = ({
         hitTargetType &&
         impactPosition
       ) {
-        
-        let damageAppliedThisHit = false;
-        let actualDamageDealt = 0;
-        let whatWasHit = hitTargetType;
-        let hpBeforeHit = currentHP; 
-
-        const dodgeRoll = Math.random() * 100;
-        if (dodgeRoll < (characterStats.dodgeChance || 0)) {
-          whatWasHit = 'dodged';
-        } else {
-          switch (hitTargetType) {
-            case "topShield":
-              if (currentTopShield > 0) {
-                setCurrentTopShield((prev) => Math.max(0, prev - 1));
-                damageAppliedThisHit = true;
-              } else {
-                whatWasHit = "body";
-              }
-              break;
-            case "leftShield":
-              if (currentLeftShield > 0) {
-                setCurrentLeftShield((prev) => Math.max(0, prev - 1));
-                damageAppliedThisHit = true;
-              } else {
-                whatWasHit = "body";
-              }
-              break;
-            case "rightShield":
-              if (currentRightShield > 0) {
-                setCurrentRightShield((prev) => Math.max(0, prev - 1));
-                damageAppliedThisHit = true;
-              } else {
-                whatWasHit = "body";
-              }
-              break;
-          }
-
-          if (whatWasHit === "body") {
-            let damage = originalBulletData.attackPoints || 0; 
-            const damageReduction = Math.min((characterStats.armor || 0) / 100, 0.8);
-            damage = Math.max(1, Math.round(damage * (1 - damageReduction)));
-            actualDamageDealt = damage;
-            setCurrentHP((prevHP) => Math.max(0, prevHP - actualDamageDealt));
-            damageAppliedThisHit = true;
-          }
-        }
-
         const explosion = { id: crypto.randomUUID(), position: impactPosition };
         setExplosions((prev) => [...prev.slice(-29), explosion]);
 
         if (sendEventToServer && socketId) {
           const hitEventData = {
             bulletId: originalBulletData.id,
-            targetPlayerId: socketId, 
-            shooterPlayerId: originalBulletData.originalShooterId, 
-            hitType: whatWasHit,
-            damageDealt: actualDamageDealt,
+            targetPlayerId: socketId,
+            shooterPlayerId: originalBulletData.originalShooterId,
+            hitType: hitTargetType,
           };
+          console.log(`PLAYGROUND (${socketId}): Metak od protivnika (ID: ${originalBulletData.id}) pogodio: ${hitTargetType}. Šaljem serveru za obradu.`);
           sendEventToServer('bullet_hit_player', hitEventData);
         }
-        setBullets((prev) => prev.filter((b) => b.id !== bulletId)); 
-        return; 
+
+        setBullets((prev) => prev.filter((b) => b.id !== bulletId));
+        return;
       }
 
       setBullets((prev) => prev.filter((b) => b.id !== bulletId));
-      if (impactPosition && !hitTopEdge) { 
+      if (impactPosition && !hitTopEdge) {
         const explosion = { id: crypto.randomUUID(), position: impactPosition };
         setExplosions((prev) => [...prev.slice(-29), explosion]);
       }
     },
-    [
-      sendEventToServer,
-      socketId,
-      characterStats, 
-      currentHP,
-      currentTopShield,
-      currentLeftShield,
-      currentRightShield,
-      setBullets, 
-      setExplosions,
-      setCurrentHP,
-      setCurrentTopShield,
-      setCurrentLeftShield,
-      setCurrentRightShield,
-    ]
+    [sendEventToServer, socketId, setBullets, setExplosions]
   );
 
-  const ammoRegenTimeoutRef = useRef(null);
-  const ammoRegenIntervalRef = useRef(null);
-  
-  useEffect(() => {
-    const maxTotalAmmo = (characterStats.ammunition || 0) * (characterStats.guns || 1);
-    if (ammoRegenTimeoutRef.current) clearTimeout(ammoRegenTimeoutRef.current);
-    if (ammoRegenIntervalRef.current) clearInterval(ammoRegenIntervalRef.current);
-
-    if (currentAmmo_Play < maxTotalAmmo) {
-      ammoRegenTimeoutRef.current = setTimeout(() => {
-        ammoRegenIntervalRef.current = setInterval(() => {
-          setCurrentAmmo_Play((prevAmmo) => {
-            if (prevAmmo < maxTotalAmmo) {
-              return Math.min(maxTotalAmmo, prevAmmo + (characterStats.guns || 1));
-            } else {
-              clearInterval(ammoRegenIntervalRef.current);
-              return prevAmmo;
-            }
-          });
-        }, 100);
-      }, 150);
-    }
-    return () => {
-      if (ammoRegenTimeoutRef.current) clearTimeout(ammoRegenTimeoutRef.current);
-      if (ammoRegenIntervalRef.current) clearInterval(ammoRegenIntervalRef.current);
-    };
-  }, [currentAmmo_Play, characterStats.ammunition, characterStats.guns]);
-
-  const getCharacterCollisionZones = useCallback(() => {
-    if (!totalCharDimensions.current.width || !playAreaBounds) return null;
-
-    const charX = charPosition.x;
-    const charY = charPosition.y;
-    
-    const currentBodySize = 70 + (characterStats.healthPoints || 100) / 30;
-    const approxGunActualHeight = 40 + ((characterStats.bulletSpeed || 1) - 1) * 10 + Math.max(0, (characterStats.attackPoints || 0) / 10 - 2);
-    const approxGunWrapperTranslateY = 10 + currentTopShield + recoil;
-    const bodyRelativeOffsetY = approxGunActualHeight + approxGunWrapperTranslateY;
-    const bodyRelativeOffsetX = (characterStats.sideShield || 0) * 1.5;
-
-    const bodyRect = {
-      x: charX + bodyRelativeOffsetX,
-      y: charY + bodyRelativeOffsetY,
-      width: currentBodySize,
-      height: currentBodySize,
-    };
-
-    const topShieldEffectiveThickness = 5 + currentTopShield * 2;
-    const topShieldZone = currentTopShield > 0 ? {
-      x: bodyRect.x, y: bodyRect.y - topShieldEffectiveThickness,
-      width: currentBodySize, height: topShieldEffectiveThickness,
-    } : null;
-
-    const sideShieldEffectiveThickness = 5 + (characterStats.sideShield || 0) * 2;
-    const leftShieldZone = currentLeftShield > 0 ? {
-      x: bodyRect.x - sideShieldEffectiveThickness, y: bodyRect.y,
-      width: sideShieldEffectiveThickness, height: currentBodySize,
-    } : null;
-
-    const rightShieldZone = currentRightShield > 0 ? {
-      x: bodyRect.x + currentBodySize, y: bodyRect.y,
-      width: sideShieldEffectiveThickness, height: currentBodySize,
-    } : null;
-
-    return { bodyZone: bodyRect, topShieldZone, leftShieldZone, rightShieldZone };
-  }, [
-    charPosition, totalCharDimensions.current, characterStats, 
-    currentTopShield, currentLeftShield, currentRightShield, recoil, playAreaBounds 
-  ]);
-
-  const characterCollisionZones = getCharacterCollisionZones();
-
-  useEffect(() => {
-    if (currentHP <= 0 && socketId && sendEventToServer) {
-      const hasAlreadySentDefeat = localStorage.getItem(`defeat_sent_${socketId}`);
-      if (!hasAlreadySentDefeat) {
-        console.log(`PLAYGROUND (${socketId}): HP pao na 0! Javljam serveru.`);
-        sendEventToServer("player_defeated", { playerId: socketId });
-        localStorage.setItem(`defeat_sent_${socketId}`, 'true'); 
-        setTimeout(() => localStorage.removeItem(`defeat_sent_${socketId}`), 5000);
-      }
-    }
-  }, [currentHP, socketId, sendEventToServer]);
-
-
-  useEffect(() => {
-    if (initialIncomingBullets && initialIncomingBullets.length > 0 && playAreaBounds) {
-      const bulletsToActuallyAdd = [];
-      initialIncomingBullets.forEach((bulletDataFromServer) => {
-        let incomingX = bulletDataFromServer.xPosition;
-        const newIncomingBullet = {
-          id: bulletDataFromServer.bulletId || crypto.randomUUID(), 
-          startPositionData: {
-            x: incomingX,
-            y: 5, 
-          },
-          initialRotation: bulletDataFromServer.bulletRotation + 180, 
-          bulletSpeedStat: bulletDataFromServer.bulletStats.speed,
-          isOpponentBullet: true,
-          attackPoints: bulletDataFromServer.bulletStats.damage,
-          originalShooterId: bulletDataFromServer.originalShooterId,
-        };
-        bulletsToActuallyAdd.push(newIncomingBullet);
-        if (onClearIncomingBullet) {
-          onClearIncomingBullet(newIncomingBullet.id); 
-        }
-      });
-      if (bulletsToActuallyAdd.length > 0) {
-        setBullets((prev) => [...prev, ...bulletsToActuallyAdd]);
-      }
-    }
-  }, [initialIncomingBullets, onClearIncomingBullet, playAreaBounds, socketId]);
 
   return (
     <div className="PgImmageWrap">
@@ -613,10 +560,10 @@ const Playground = ({
           <section className="Playground-statsLeft Playground-statsDisplay">
             <h1 className="Playground-statsTitle">BULLETS</h1>
             <div className="Playground-bulletWrap">
-              {Array.from({ length: Math.max(0, Math.floor(currentAmmo_Play / (characterStats.guns || 1))) }).map((_, index) => (
-                <div key={index} className="Playground-bulletIndicator" style={{ backgroundColor: characterStats.bodyColor }}></div>
+              {Array.from({ length: Math.max(0, currentAmmo_Play) }).map((_, index) => (
+                <div key={index} className="Playground-bulletIndicator" style={{ backgroundColor: characterBaseStats.bodyColor }}></div>
               ))}
-              {Array.from({ length: Math.max(0, (characterStats.ammunition || 0) - Math.floor(currentAmmo_Play / (characterStats.guns || 1))) }).map((_, index) => (
+              {Array.from({ length: Math.max(0, (characterBaseStats.maxAmmunition || 0) - currentAmmo_Play) }).map((_, index) => (
                 <div key={index} className="Playground-bulletIndicator Playground-bulletIndicator--empty"></div>
               ))}
             </div>
@@ -628,32 +575,33 @@ const Playground = ({
                 <>
                   <MotionEnabledCharacter
                     ref={characterRef}
-                    healthPoints={characterStats.healthPoints} 
+                    healthPoints={currentHP} 
                     topShield={currentTopShield} 
                     sideShield={currentLeftShield} 
-                    guns={characterStats.guns}
-                    dodgeChance={characterStats.dodgeChance}
-                    armor={characterStats.armor}
-                    attackPoints={characterStats.attackPoints}
-                    ammunition={Math.floor(currentAmmo_Play / (characterStats.guns || 1))} 
-                    ammunitionMax={characterStats.ammunition} 
-                    CAModifier={characterStats.CAModifier}
-                    attackSpeed={characterStats.attackSpeed}
-                    bulletSpeed={characterStats.bulletSpeed}
-                    movemantSpeed={characterStats.movemantSpeed}
-                    bodyColor={characterStats.bodyColor}
+                    guns={characterBaseStats.guns} 
+                    dodgeChance={characterBaseStats.dodgeChance}
+                    armor={characterBaseStats.armor}
+                    attackPoints={characterBaseStats.attackPoints}
+                    ammunition={currentAmmo_Play} 
+                    ammunitionMax={characterBaseStats.maxAmmunition} 
+                    CAModifier={characterBaseStats.CAModifier}
+                    attackSpeed={characterBaseStats.attackSpeed}
+                    bulletSpeed={characterBaseStats.bulletSpeed}
+                    movemantSpeed={characterBaseStats.movemantSpeed}
+                    bodyColor={characterBaseStats.bodyColor}
                     rotate={charRotation}
                     rotateInverse={charRotationInverse}
-                    displayType={true} 
+                    displayType={true}
                     onShoot={handleShootFromCharacter}
+                    onTriggerPull={handlePlayerTriggerPull} 
                     recoil={recoil}
-                    canvasRef={playgroundDisplayRef} 
+                    canvasRef={playgroundDisplayRef}
                     boxShadow={boxShadow}
                     style={{
                       position: "absolute",
                       left: `${charPosition.x + BORDER_LEFT_PG_DISPLAY}px`,
                       top: `${charPosition.y + BORDER_TOP_PG_DISPLAY}px`,
-                      rotate: charRotation, 
+                      rotate: charRotation,
                       transformOrigin,
                     }}
                   />
@@ -712,12 +660,11 @@ const Playground = ({
         </div>
         <div className="Playground-lowerPart">
           <div className="Playground-phaseWrap">
-            {/* <div className="Playground-phase">PHASE I</div> */}
           </div>
           <div className="Playground-healthWrap">
             <h2 className="Playground-healthEmoji">❤️</h2>
             <div className="Playground-healthBar">
-              <HealthBar maxHealth={characterStats.healthPoints || 100} health={currentHP} />
+              <HealthBar maxHealth={characterBaseStats.maxHealthPoints || 100} health={currentHP} />
             </div>
             <h2 className="Playground-healthValue">{currentHP}</h2>
           </div>

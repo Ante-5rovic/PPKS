@@ -6,15 +6,15 @@ import { motion } from "framer-motion";
 const Character = forwardRef((props,ref) => {
   const {
     canvasRef,
-    healthPoints,
-    topShield,
-    sideShield,
+    healthPoints, 
+    topShield,    
+    sideShield,   
     guns,
     dodgeChance,
     armor,
     attackPoints,
-    ammunition,
-    ammunitionMax,
+    ammunition,  
+    ammunitionMax, 
     CAModifier,
     attackSpeed,
     bulletSpeed,
@@ -25,21 +25,26 @@ const Character = forwardRef((props,ref) => {
     rotate,
     rotateInverse,
     displayType,
-    onShoot,
+    onShoot, 
+    onTriggerPull, 
     recoil,
     ...rest
   } = props;
 
   const [shootSignal, setShootSignal] = useState(0);
-  // console.log("🔁 Character render", shootSignal);
 
-  const handleGunShoot = (newBullet) => {
+  const handleGunShoot = (newBulletFromGun) => {
     if (props.onShoot) {
-      props.onShoot(newBullet);
+      props.onShoot(newBulletFromGun, shootSignal); 
     }
   };
 
   const handleShootAllGuns = () => {
+    // 1. Prvo, obavijesti roditelja (Playground) da je okidač pritisnut
+    if (onTriggerPull) {
+      onTriggerPull(); // <-- Pozivamo onTriggerPull
+    }
+    // 2. Potom, inkrementiraj shootSignal da bi svi topovi ispalili metke
     setShootSignal((prev) => prev + 1);
   };
 
@@ -51,7 +56,7 @@ const Character = forwardRef((props,ref) => {
     };
 
     const handleMouseUp = (e) => {
-      if (e.button === 0) {
+      if (e.button === 0) { // Left mouse button
         handleShootAllGuns();
       }
     };
@@ -63,7 +68,7 @@ const Character = forwardRef((props,ref) => {
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, []);
+  }, [onTriggerPull]); 
 
   const gunComponents = useMemo(
     () =>
@@ -77,9 +82,9 @@ const Character = forwardRef((props,ref) => {
           movemantSpeed={movemantSpeed}
           bulletSpeed={bulletSpeed}
           rotation={rotate}
-          onShoot={handleGunShoot}
+          onShoot={handleGunShoot} 
           canvasRef={canvasRef}
-          shootSignal={shootSignal}
+          shootSignal={shootSignal} 
         />
       )),
     [
@@ -92,6 +97,7 @@ const Character = forwardRef((props,ref) => {
       bulletSpeed,
       rotate,
       shootSignal,
+      handleGunShoot 
     ]
   );
 
@@ -120,14 +126,14 @@ const Character = forwardRef((props,ref) => {
     [topShield, sideShield,recoil]
   );
 
-  const characterBodySize = 70 + healthPoints / 30;
+  const characterBodySize = 70 + healthPoints / 30; 
   const characterBodyStyle = useMemo(
     () => ({
       width: `${characterBodySize}px`,
       height: `${characterBodySize}px`,
-      borderTop: `${topShield * 1.5}px solid transparent`,
-      borderLeft: `${sideShield * 1.5}px solid transparent`,
-      borderRight: `${sideShield * 1.5}px solid transparent`,
+      borderTop: `${topShield * 1.5}px solid transparent`, 
+      borderLeft: `${sideShield * 1.5}px solid transparent`, 
+      borderRight: `${sideShield * 1.5}px solid transparent`, 
       borderRadius: `${5 + dodgeChance}px`,
       boxShadow: boxShadow,
       backgroundColor: bodyColor,

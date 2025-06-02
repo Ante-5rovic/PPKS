@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { motion, useMotionValue, useSpring } from 'framer-motion'; 
 import "./healthbar.scss"
 
 const interpolateColor = (healthPercentage) => {
@@ -26,12 +27,24 @@ const HealthBar = ({ health, maxHealth }) => {
   const healthPercentage = (health / maxHealth) * 100;
   const barColor = interpolateColor(healthPercentage);
 
+  const width = useMotionValue(healthPercentage); 
+  const smoothedWidth = useSpring(width, {
+    damping: 15,    
+    stiffness: 100, 
+    restDelta: 0.1  
+  });
+
+
+  useEffect(() => {
+    width.set(healthPercentage);
+  }, [healthPercentage, width]);
+
   return (
     <div className="HealthBar">
-      <div
+      <motion.div
         className="HealthBar-progres"
         style={{
-          width: `${healthPercentage}%`,
+          width: smoothedWidth, 
           backgroundColor: barColor,
         }}
       />

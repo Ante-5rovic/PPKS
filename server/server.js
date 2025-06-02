@@ -8,7 +8,7 @@ const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173", 
+    origin: "http://localhost:5173",
     methods: ["GET", "POST"],
   },
 });
@@ -24,20 +24,21 @@ const PHASES = {
 
 const PHASE_DURATIONS = {
   [PHASES.INTRO]: 5,
-  [PHASES.BUILDER]: 10, 
+  [PHASES.BUILDER]: 10,
   [PHASES.BETWEEN]: 3,
+  [PHASES.PLAYGROUND]: 120,
 };
 
 const BASE_CHARACTER_STATS = {
   bodyColor: "#8E7AB5",
-  healthPoints: 100,
-  topShield: 0,
-  sideShield: 0,
+  healthPoints: 100, 
+  topShield: 0,     
+  sideShield: 0,     
   guns: 1,
   dodgeChance: 0,
   armor: 0,
   attackPoints: 20,
-  ammunition: 6,
+  ammunition: 6,     
   CAModifier: 0.0,
   attackSpeed: 1.0,
   bulletSpeed: 1.0,
@@ -48,6 +49,10 @@ let waitingPlayer = null;
 let gameSessions = new Map();
 let nextSessionId = 1;
 
+// Ammo Regeneration config
+const AMMO_REGEN_DELAY_MS = 500; // Delay after last shot before regen starts
+const AMMO_REGEN_RATE_MS = 100;   // Interval for regenerating 1 ammo unit
+
 function createAndStartGameSession(player1Socket, player2Socket) {
   const sessionId = nextSessionId++;
   console.log(
@@ -55,6 +60,7 @@ function createAndStartGameSession(player1Socket, player2Socket) {
   );
 
   const sessionData = {
+    sessionId: sessionId,
     player1Id: player1Socket.id,
     player2Id: player2Socket.id,
     currentPhase: PHASES.WAITING,
@@ -62,14 +68,28 @@ function createAndStartGameSession(player1Socket, player2Socket) {
     timerInterval: null,
     player1Data: {
       socket: player1Socket,
-      characterStats: JSON.parse(JSON.stringify(BASE_CHARACTER_STATS)),
-      isBuildComplete: false, 
-      isReadyForBuildTimer: false, 
+      characterStats: JSON.parse(JSON.stringify(BASE_CHARACTER_STATS)), 
+      currentHealth: BASE_CHARACTER_STATS.healthPoints,
+      currentTopShield: BASE_CHARACTER_STATS.topShield,
+      currentSideShield: BASE_CHARACTER_STATS.sideShield,
+      currentAmmunition: BASE_CHARACTER_STATS.ammunition, 
+      lastShotTime: 0, 
+      ammoRegenTimeout: null, 
+      ammoRegenInterval: null, 
+      isBuildComplete: false,
+      isReadyForBuildTimer: false,
       opponentId: player2Socket.id,
     },
     player2Data: {
       socket: player2Socket,
-      characterStats: JSON.parse(JSON.stringify(BASE_CHARACTER_STATS)),
+      characterStats: JSON.parse(JSON.stringify(BASE_CHARACTER_STATS)), 
+      currentHealth: BASE_CHARACTER_STATS.healthPoints,
+      currentTopShield: BASE_CHARACTER_STATS.topShield,
+      currentSideShield: BASE_CHARACTER_STATS.sideShield,
+      currentAmmunition: BASE_CHARACTER_STATS.ammunition, 
+      lastShotTime: 0, 
+      ammoRegenTimeout: null,
+      ammoRegenInterval: null,
       isBuildComplete: false,
       isReadyForBuildTimer: false,
       opponentId: player1Socket.id,
@@ -105,6 +125,59 @@ function createAndStartGameSession(player1Socket, player2Socket) {
   startPhaseForSession(sessionId, PHASES.INTRO);
 }
 
+function startAmmoRegen(session, playerId) {
+    const playerData = (session.player1Id === playerId) ? session.player1Data : session.player2Data;
+    if (!playerData) return;
+
+    stopAmmoRegen(playerData);
+
+    const timeSinceLastShot = Date.now() - playerData.lastShotTime;
+    const delayUntilRegenStarts = AMMO_REGEN_DELAY_MS - timeSinceLastShot;
+
+    playerData.ammoRegenTimeout = setTimeout(() => {
+        playerData.ammoRegenInterval = setInterval(() => {
+            if (!gameSessions.has(session.sessionId) || session.currentPhase !== PHASES.PLAYGROUND) {
+                clearInterval(playerData.ammoRegenInterval);
+                playerData.ammoRegenInterval = null;
+                return;
+            }
+
+            if (playerData.currentAmmunition < playerData.characterStats.ammunition) {
+                playerData.currentAmmunition = Math.min(
+                    playerData.characterStats.ammunition,
+                    playerData.currentAmmunition + 1
+                );
+                console.log(`SERVER (Sesija ${session.sessionId}): ${playerId} regenerirao 1 ammo. Trenutna: ${playerData.currentAmmunition}`);
+
+                playerData.socket.emit("character_data_update", {
+                    myCharacter: {
+                        ...playerData.characterStats,
+                        healthPoints: playerData.currentHealth,
+                        topShield: playerData.currentTopShield,
+                        sideShield: playerData.currentSideShield,
+                        ammunition: playerData.currentAmmunition,
+                    }
+                });
+            } else {
+                clearInterval(playerData.ammoRegenInterval);
+                playerData.ammoRegenInterval = null;
+            }
+        }, AMMO_REGEN_RATE_MS);
+    }, Math.max(0, delayUntilRegenStarts)); 
+}
+
+function stopAmmoRegen(playerData) {
+    if (playerData.ammoRegenTimeout) {
+        clearTimeout(playerData.ammoRegenTimeout);
+        playerData.ammoRegenTimeout = null;
+    }
+    if (playerData.ammoRegenInterval) {
+        clearInterval(playerData.ammoRegenInterval);
+        playerData.ammoRegenInterval = null;
+    }
+}
+
+
 function startPhaseForSession(sessionId, newPhase) {
   const session = gameSessions.get(sessionId);
   if (!session) {
@@ -124,7 +197,7 @@ function startPhaseForSession(sessionId, newPhase) {
   const commonPhaseData = {
     newPhase: session.currentPhase,
     duration: PHASE_DURATIONS[newPhase],
-    timeLeft: session.timeLeft, 
+    timeLeft: session.timeLeft,
   };
 
   let messageForPhase = undefined;
@@ -136,18 +209,23 @@ function startPhaseForSession(sessionId, newPhase) {
     session.player2Data.isBuildComplete = false;
   }
 
-  if (newPhase === PHASES.INTRO || newPhase === PHASES.BUILDER) {
-    console.log(
-      `SERVER (Sesija ${sessionId}): Šaljem game_phase_update za ${newPhase} s initialCharacterData.`
-    );
+  const getCharacterDataForClient = (playerData) => ({
+    ...playerData.characterStats, 
+    healthPoints: playerData.currentHealth, 
+    topShield: playerData.currentTopShield, 
+    sideShield: playerData.currentSideShield, 
+    ammunition: playerData.currentAmmunition, 
+  });
+
+  if (newPhase === PHASES.INTRO || newPhase === PHASES.BUILDER || newPhase === PHASES.BETWEEN || newPhase === PHASES.PLAYGROUND) {
     session.player1Data.socket.emit("game_phase_update", {
       ...commonPhaseData,
-      initialCharacterData: { myCharacter: session.player1Data.characterStats },
+      initialCharacterData: { myCharacter: getCharacterDataForClient(session.player1Data) },
       message: messageForPhase,
     });
     session.player2Data.socket.emit("game_phase_update", {
       ...commonPhaseData,
-      initialCharacterData: { myCharacter: session.player2Data.characterStats },
+      initialCharacterData: { myCharacter: getCharacterDataForClient(session.player2Data) },
       message: messageForPhase,
     });
   } else {
@@ -162,7 +240,17 @@ function startPhaseForSession(sessionId, newPhase) {
     session.timerInterval = null;
   }
 
-  if (newPhase !== PHASES.BUILDER && session.timeLeft > 0) {
+  if (newPhase === PHASES.PLAYGROUND) {
+      console.log(`SERVER (Sesija ${sessionId}): Starting ammo regen for both players.`);
+      startAmmoRegen(session, session.player1Id);
+      startAmmoRegen(session, session.player2Id);
+  } else {
+      stopAmmoRegen(session.player1Data);
+      stopAmmoRegen(session.player2Data);
+  }
+
+
+  if (session.timeLeft > 0) {
     console.log(
       `SERVER (Sesija ${sessionId}): Pokrećem tajmer za ${newPhase} na ${session.timeLeft}s`
     );
@@ -179,7 +267,27 @@ function startPhaseForSession(sessionId, newPhase) {
         clearInterval(session.timerInterval);
         session.timerInterval = null;
         if (gameSessions.has(sessionId)) {
-          proceedToNextPhaseForSession(sessionId);
+          if (session.currentPhase === PHASES.PLAYGROUND) {
+            io.to(sessionId.toString()).emit("game_over", {
+              winner: null,
+              loser: null,
+              message: "Vrijeme je isteklo! Nema pobjednika.",
+            });
+            stopAmmoRegen(session.player1Data);
+            stopAmmoRegen(session.player2Data);
+
+            const deletedSessionId = sessionId;
+            const successfullyDeleted = gameSessions.delete(sessionId);
+            console.log(
+              `SERVER: Sesija ${deletedSessionId} ${
+                successfullyDeleted
+                  ? "USPJEŠNO UKLONJENA"
+                  : "NIJE PRONAĐENA ZA UKLANJANJE"
+              } zbog isteka vremena.`
+            );
+          } else {
+            proceedToNextPhaseForSession(sessionId);
+          }
         } else {
           console.log(
             `SERVER (Sesija ${sessionId}): Sesija više ne postoji nakon isteka tajmera za ${newPhase}. Ne nastavljam.`
@@ -187,15 +295,6 @@ function startPhaseForSession(sessionId, newPhase) {
         }
       }
     }, 1000);
-  } else if (
-    newPhase !== PHASES.BUILDER &&
-    newPhase !== PHASES.PLAYGROUND &&
-    newPhase !== PHASES.WAITING &&
-    newPhase !== PHASES.GAME_OVER
-  ) {
-    console.log(
-      `SERVER (Sesija ${sessionId}): Faza ${newPhase} (koja nije BUILDER/PLAYGROUND/WAITING/GAME_OVER) ima trajanje 0 ili je bez tajmera.`
-    );
   }
 }
 
@@ -220,11 +319,20 @@ function startBuilderPhaseTimer(sessionId) {
     `SERVER (Sesija ${sessionId}): Oba igrača spremna! Pokrećem BUILDER tajmer na ${session.timeLeft}s.`
   );
 
+  const getCharacterDataForClient = (playerData) => ({ 
+    ...playerData.characterStats,
+    healthPoints: playerData.currentHealth,
+    topShield: playerData.currentTopShield,
+    sideShield: playerData.currentSideShield,
+    ammunition: playerData.currentAmmunition,
+  });
+
   io.to(sessionId.toString()).emit("game_phase_update", {
     newPhase: PHASES.BUILDER,
     duration: PHASE_DURATIONS[PHASES.BUILDER],
     timeLeft: session.timeLeft,
     message: "Odbrojavanje za izgradnju je počelo!",
+    initialCharacterData: { myCharacter: getCharacterDataForClient(session.player1Data) }, 
   });
 
   session.timerInterval = setInterval(() => {
@@ -283,32 +391,42 @@ function proceedToNextPhaseForSession(sessionId) {
       console.log(
         `SERVER (Sesija ${sessionId}): BUILDER faza (tajmer) završena. Prelazak na BETWEEN.`
       );
+      session.player1Data.currentHealth = session.player1Data.characterStats.healthPoints;
+      session.player1Data.currentTopShield = session.player1Data.characterStats.topShield;
+      session.player1Data.currentSideShield = session.player1Data.characterStats.sideShield;
+      session.player1Data.currentAmmunition = session.player1Data.characterStats.ammunition; 
+
+      session.player2Data.currentHealth = session.player2Data.characterStats.healthPoints;
+      session.player2Data.currentTopShield = session.player2Data.characterStats.topShield;
+      session.player2Data.currentSideShield = session.player2Data.characterStats.sideShield;
+      session.player2Data.currentAmmunition = session.player2Data.characterStats.ammunition; 
+
       startPhaseForSession(sessionId, PHASES.BETWEEN);
       break;
     case PHASES.BETWEEN:
       console.log(
         `SERVER (Sesija ${sessionId}): BETWEEN faza završena. Slanje game_start_info i prelazak na PLAYGROUND.`
       );
-      console.log(
-        `SERVER (Sesija ${sessionId}): Pripremam game_start_info. P1 stats:`,
-        JSON.parse(JSON.stringify(session.player1Data.characterStats))
-      );
-      console.log(
-        `SERVER (Sesija ${sessionId}): Pripremam game_start_info. P2 stats:`,
-        JSON.parse(JSON.stringify(session.player2Data.characterStats))
-      );
+
+      const getCharacterDataForClient = (playerData) => ({
+        ...playerData.characterStats,
+        healthPoints: playerData.currentHealth,
+        topShield: playerData.currentTopShield,
+        sideShield: playerData.currentSideShield,
+        ammunition: playerData.currentAmmunition,
+      });
 
       session.player1Data.socket.emit("game_start_info", {
-        myCharacter: session.player1Data.characterStats,
-        opponentCharacter: session.player2Data.characterStats,
+        myCharacter: getCharacterDataForClient(session.player1Data),
+        opponentCharacter: session.player2Data.characterStats, // Opponent's base stats
         startingPhase: PHASES.PLAYGROUND,
-        timeLeftInRound: 120,
+        timeLeftInRound: PHASE_DURATIONS[PHASES.PLAYGROUND],
       });
       session.player2Data.socket.emit("game_start_info", {
-        myCharacter: session.player2Data.characterStats,
-        opponentCharacter: session.player1Data.characterStats,
+        myCharacter: getCharacterDataForClient(session.player2Data),
+        opponentCharacter: session.player1Data.characterStats, // Opponent's base stats
         startingPhase: PHASES.PLAYGROUND,
-        timeLeftInRound: 120,
+        timeLeftInRound: PHASE_DURATIONS[PHASES.PLAYGROUND],
       });
       startPhaseForSession(sessionId, PHASES.PLAYGROUND);
       break;
@@ -350,6 +468,7 @@ io.on("connection", (socket) => {
           socket.id === session.player1Id
             ? session.player1Data
             : session.player2Data;
+
         let messageForReconnect = "Nastavljaš postojeću igru...";
         if (
           session.currentPhase === PHASES.BUILDER &&
@@ -361,12 +480,23 @@ io.on("connection", (socket) => {
             : "Izgradi lika i klikni Ready!";
         }
 
+        const getCharacterDataForClient = (playerData) => ({
+          ...playerData.characterStats,
+          healthPoints: playerData.currentHealth,
+          topShield: playerData.currentTopShield,
+          sideShield: playerData.currentSideShield,
+          ammunition: playerData.currentAmmunition,
+        });
+
+
         socket.emit("game_phase_update", {
           newPhase: session.currentPhase,
           duration: PHASE_DURATIONS[session.currentPhase],
-          timeLeft: session.timeLeft, 
+          timeLeft: session.timeLeft,
           message: messageForReconnect,
-          initialCharacterData: { myCharacter: playerData.characterStats },
+          initialCharacterData: {
+            myCharacter: getCharacterDataForClient(playerData),
+          },
         });
         if (session.currentPhase === PHASES.PLAYGROUND) {
           const opponentData =
@@ -374,7 +504,7 @@ io.on("connection", (socket) => {
               ? session.player2Data
               : session.player1Data;
           socket.emit("game_start_info", {
-            myCharacter: playerData.characterStats,
+            myCharacter: getCharacterDataForClient(playerData),
             opponentCharacter: opponentData.characterStats,
             startingPhase: PHASES.PLAYGROUND,
             timeLeftInRound: session.timeLeft,
@@ -427,7 +557,7 @@ io.on("connection", (socket) => {
     );
     if (!sessionIdString) {
       console.warn(
-        `SERVER: ${socket.id} poslao 'character_stat_update', ali nije u aktivnoj sesiji.`
+        `SERVER: ${socket.id} poslao 'character_stat_update', but not in an active session.`
       );
       return;
     }
@@ -444,13 +574,14 @@ io.on("connection", (socket) => {
         payload.currentStats &&
         !playerData.isReadyForBuildTimer
       ) {
-        console.log(
-          `SERVER (Sesija ${sessionId}): Primam 'character_stat_update' od ${socket.id}.`
-        );
         playerData.characterStats = { ...payload.currentStats };
+        playerData.currentHealth = playerData.characterStats.healthPoints;
+        playerData.currentTopShield = playerData.characterStats.topShield;
+        playerData.currentSideShield = playerData.characterStats.sideShield;
+        playerData.currentAmmunition = playerData.characterStats.ammunition;
+
         console.log(
-          `SERVER (Sesija ${sessionId}): ${socket.id} STATSI AŽURIRANI. Novi playerData.characterStats:`,
-          JSON.parse(JSON.stringify(playerData.characterStats))
+          `SERVER (Sesija ${sessionId}): Primam 'character_stat_update' od ${socket.id}. Bazni i trenutni stats ažurirani.`
         );
       } else if (playerData && playerData.isReadyForBuildTimer) {
         console.log(
@@ -463,6 +594,7 @@ io.on("connection", (socket) => {
     } else if (session) {
       console.warn(
         `SERVER (Sesija ${sessionId}): Primljen 'character_stat_update' od ${socket.id} izvan BUILDER faze (trenutna: ${session.currentPhase}).`
+
       );
     }
   });
@@ -473,7 +605,7 @@ io.on("connection", (socket) => {
     );
     if (!sessionIdString) {
       console.warn(
-        `SERVER: ${socket.id} poslao 'character_build_complete', ali nije u aktivnoj sesiji.`
+        `SERVER: ${socket.id} poslao 'character_build_complete', but not in an active session.`
       );
       return;
     }
@@ -487,29 +619,40 @@ io.on("connection", (socket) => {
           : session.player2Data;
       if (playerData) {
         if (playerData.isReadyForBuildTimer) {
-          console.log(
-            `SERVER (Sesija ${sessionId}): Igrač ${socket.id} je već kliknuo Ready. Ignoriram ponovljeni 'character_build_complete'.`
-          );
           return;
         }
         console.log(
           `SERVER (Sesija ${sessionId}): Primam 'character_build_complete' (READY signal) od ${socket.id}.`
         );
 
-        playerData.characterStats = { ...builtCharacterData }; 
-        playerData.isReadyForBuildTimer = true; 
+        playerData.characterStats = { ...builtCharacterData };
+        playerData.currentHealth = builtCharacterData.healthPoints;
+        playerData.currentTopShield = builtCharacterData.topShield;
+        playerData.currentSideShield = builtCharacterData.sideShield;
+        playerData.currentAmmunition = builtCharacterData.ammunition;
+        playerData.isReadyForBuildTimer = true;
 
         console.log(
-          `SERVER (Sesija ${sessionId}): ${socket.id} je kliknuo Ready. Novi stats:`,
+          `SERVER (Sesija ${sessionId}): ${socket.id} je kliknuo Ready. Finalni stats:`,
           JSON.parse(JSON.stringify(playerData.characterStats))
         );
 
+        const getCharacterDataForClient = (playerData) => ({
+          ...playerData.characterStats,
+          healthPoints: playerData.currentHealth,
+          topShield: playerData.currentTopShield,
+          sideShield: playerData.currentSideShield,
+          ammunition: playerData.currentAmmunition,
+        });
+
         socket.emit("game_phase_update", {
           newPhase: PHASES.BUILDER,
-          timeLeft: PHASE_DURATIONS[PHASES.BUILDER], 
+          timeLeft: PHASE_DURATIONS[PHASES.BUILDER],
           duration: PHASE_DURATIONS[PHASES.BUILDER],
           message: "Tvoj odabir je spremljen. Čekam protivnika...",
-          initialCharacterData: { myCharacter: playerData.characterStats },
+          initialCharacterData: {
+            myCharacter: getCharacterDataForClient(playerData),
+          },
         });
 
         if (
@@ -559,6 +702,9 @@ io.on("connection", (socket) => {
               });
             }
             if (session.timerInterval) clearInterval(session.timerInterval);
+            stopAmmoRegen(session.player1Data);
+            stopAmmoRegen(session.player2Data);
+
             const deletedSessionId = sessionId;
             const successfullyDeleted = gameSessions.delete(sessionId);
             console.log(
@@ -576,54 +722,74 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("player_fired_trigger", ({ playerId }) => {
+    const sessionIdString = Array.from(socket.rooms).find(
+      (room) => room !== socket.id && gameSessions.has(parseInt(room, 10))
+    );
+    if (!sessionIdString) {
+      console.warn(`SERVER: ${socket.id} pokušao pritisnuti okidač, ali NIJE u aktivnoj sesiji.`);
+      return;
+    }
+    const sessionId = parseInt(sessionIdString, 10);
+    const session = gameSessions.get(sessionId);
+    if (!session || session.currentPhase !== PHASES.PLAYGROUND) {
+      console.warn(`SERVER (Sesija ${sessionId}): Igrač ${socket.id} pokušao pritisnuti okidač izvan PLAYGROUND faze ili sesija nije pronađena.`);
+      return;
+    }
+
+    const shooterData = (socket.id === session.player1Id) ? session.player1Data : session.player2Data;
+    if (!shooterData) {
+      console.warn(`SERVER (Sesija ${sessionId}): Strijelac ${socket.id} nije pronađen u sesiji za pritisak okidača.`);
+      return;
+    }
+
+
+    if (shooterData.currentAmmunition > 0) {
+      shooterData.currentAmmunition--; 
+      shooterData.lastShotTime = Date.now(); 
+      console.log(`SERVER (Sesija ${sessionId}): Igrač ${socket.id} pritisnuo okidač. Trenutna municija: ${shooterData.currentAmmunition}`);
+
+      startAmmoRegen(session, shooterData.socket.id);
+
+      const getCharacterDataForClient = (playerData) => ({
+        ...playerData.characterStats,
+        healthPoints: playerData.currentHealth,
+        topShield: playerData.currentTopShield,
+        sideShield: playerData.currentSideShield,
+        ammunition: playerData.currentAmmunition,
+      });
+      shooterData.socket.emit("character_data_update", {
+        myCharacter: getCharacterDataForClient(shooterData)
+      });
+    } else {
+      console.warn(`SERVER (Sesija ${sessionId}): Igrač ${socket.id} pokušao pritisnuti okidač, ali nema municije!`);
+      shooterData.socket.emit("action_error", { message: "Nema municije!" });
+    }
+  });
+
+
   socket.on("bullet_fired_at_opponent", (bulletEventData) => {
     const sessionIdString = Array.from(socket.rooms).find(
       (room) => room !== socket.id && gameSessions.has(parseInt(room, 10))
     );
     if (!sessionIdString) {
       console.warn(
-        `SERVER: ${
-          socket.id
-        } ispalio metak, ali NIJE u aktivnoj session sobi. Socket rooms: ${JSON.stringify(
-          Array.from(socket.rooms)
-        )}`
+        `SERVER: ${socket.id} poslao metak (za vizualizaciju), ali NIJE u aktivnoj session sobi.`
       );
       return;
     }
     const sessionId = parseInt(sessionIdString, 10);
     const session = gameSessions.get(sessionId);
-    if (!session) {
-      console.error(
-        `SERVER: Sesija ${sessionId} (iz sobe ${sessionIdString}) NIJE PRONAĐENA za bullet event od ${
-          socket.id
-        }. Aktivne sesije: [${Array.from(gameSessions.keys()).join(", ")}]`
-      );
-      return;
-    }
-    if (session.currentPhase !== PHASES.PLAYGROUND) {
+    if (!session || session.currentPhase !== PHASES.PLAYGROUND) {
       console.warn(
-        `SERVER (Sesija ${sessionId}): Igrač ${socket.id} pokušao pucati izvan PLAYGROUND faze (trenutna: ${session.currentPhase}). Metak odbačen.`
+        `SERVER (Sesija ${sessionId}): Igrač ${socket.id} pokušao poslati metak (za vizualizaciju) izvan PLAYGROUND faze. Metak odbačen.`
       );
       return;
     }
-    if (
-      typeof bulletEventData.xPosition !== "number" ||
-      typeof bulletEventData.bulletRotation !== "number" ||
-      typeof bulletEventData.bulletStats !== "object" ||
-      typeof bulletEventData.bulletStats.speed !== "number" ||
-      typeof bulletEventData.bulletStats.damage !== "number" ||
-      !bulletEventData.originalShooterId
-    ) {
-      console.error(
-        `SERVER (Sesija ${sessionId}): Primljen neispravan bulletEventData od ${socket.id}:`,
-        JSON.stringify(bulletEventData)
-      );
-      return;
-    }
-    const opponentData =
-      socket.id === session.player1Id
-        ? session.player2Data
-        : session.player1Data;
+
+    // Pronađi podatke protivnika
+    const opponentData = (socket.id === session.player1Id) ? session.player2Data : session.player1Data;
+
     if (opponentData.socket && opponentData.socket.connected) {
       const dataToSendToOpponent = {
         originalShooterId: bulletEventData.originalShooterId,
@@ -633,18 +799,13 @@ io.on("connection", (socket) => {
           speed: bulletEventData.bulletStats.speed,
           damage: bulletEventData.bulletStats.damage,
         },
-        bulletId:
-          bulletEventData.bulletId ||
-          `server_bullet_${Date.now()}_${Math.random()
-            .toString(36)
-            .substr(2, 5)}`,
+        bulletId: bulletEventData.bulletId || `server_bullet_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       };
       opponentData.socket.emit("incoming_bullet", dataToSendToOpponent);
+      // console.log(`SERVER (Sesija ${sessionId}): Metak (ID: ${dataToSendToOpponent.bulletId}) od ${socket.id} proslijeđen protivniku.`);
     } else {
       console.log(
-        `SERVER (Sesija ${sessionId}): Protivnik igrača ${socket.id} (ID: ${
-          opponentData.opponentId || "nepoznat"
-        }) nije spojen. Metak nije poslan.`
+        `SERVER (Sesija ${sessionId}): Protivnik igrača ${socket.id} nije spojen. Metak nije poslan.`
       );
     }
   });
@@ -663,9 +824,7 @@ io.on("connection", (socket) => {
     const session = gameSessions.get(sessionId);
     if (!session) {
       console.error(
-        `SERVER: Sesija ${sessionId} nije pronađena za bullet_hit_player od ${
-          socket.id
-        }. Aktivne sesije: [${Array.from(gameSessions.keys()).join(", ")}]`
+        `SERVER: Sesija ${sessionId} nije pronađena za bullet_hit_player od ${socket.id}. Aktivne sesije: [${Array.from(gameSessions.keys()).join(", ")}]`
       );
       return;
     }
@@ -681,70 +840,103 @@ io.on("connection", (socket) => {
       );
       return;
     }
-    const shooterIsP1 = hitData.shooterPlayerId === session.player1Id;
-    const targetIsP2 = hitData.targetPlayerId === session.player2Id;
-    const shooterIsP2 = hitData.shooterPlayerId === session.player2Id;
-    const targetIsP1 = hitData.targetPlayerId === session.player1Id;
-    if (!((shooterIsP1 && targetIsP2) || (shooterIsP2 && targetIsP1))) {
-      console.warn(
-        `SERVER (Sesija ${sessionId}): Neispravni shooter/target ID-jevi u bullet_hit_player...`
-      );
+
+    const shooterData = (hitData.shooterPlayerId === session.player1Id) ? session.player1Data : session.player2Data;
+    const targetPlayerData = (hitData.targetPlayerId === session.player1Id) ? session.player1Data : session.player2Data;
+
+    if (!shooterData || !targetPlayerData || !targetPlayerData.characterStats) {
+      console.error(`SERVER (Sesija ${sessionId}): Nije moguće pronaći podatke za strijelca (${hitData.shooterPlayerId}) ili metu (${hitData.targetPlayerId}) ili meta nema characterStats.`);
       return;
     }
-    const shooterSocket =
-      hitData.shooterPlayerId === session.player1Id
-        ? session.player1Data.socket
-        : session.player2Data.socket;
-    if (shooterSocket && shooterSocket.connected) {
-      shooterSocket.emit("your_bullet_hit_opponent", {
+
+  
+    if (shooterData.socket && shooterData.socket.connected) {
+      shooterData.socket.emit("your_bullet_hit_opponent", {
         bulletId: hitData.bulletId,
         hitType: hitData.hitType,
-        damageDealt: hitData.damageDealt,
+        damageDealt: hitData.damageDealt, 
       });
     }
-    const targetPlayerData =
-      hitData.targetPlayerId === session.player1Id
-        ? session.player1Data
-        : session.player2Data;
-    if (targetPlayerData && targetPlayerData.characterStats) {
-      if (hitData.hitType !== "dodged") {
-        let hpChanged = false;
-        if (
-          hitData.hitType === "topShield" &&
-          targetPlayerData.characterStats.topShield > 0
-        ) {
-          targetPlayerData.characterStats.topShield--;
-        } else if (
-          hitData.hitType === "leftShield" &&
-          targetPlayerData.characterStats.sideShield > 0
-        ) {
-          targetPlayerData.characterStats.sideShield--;
-        } else if (
-          hitData.hitType === "rightShield" &&
-          targetPlayerData.characterStats.sideShield > 0
-        ) {
-          targetPlayerData.characterStats.sideShield--;
-        } else if (hitData.hitType === "body") {
-          targetPlayerData.characterStats.healthPoints -= hitData.damageDealt;
-          targetPlayerData.characterStats.healthPoints = Math.max(
-            0,
-            targetPlayerData.characterStats.healthPoints
-          );
-          hpChanged = true;
+
+    let actualDamageDealt = 0;
+    let finalHitType = hitData.hitType;
+
+    let damageToApply = shooterData.characterStats.attackPoints || 0;
+
+    const dodgeChance = targetPlayerData.characterStats.dodgeChance || 0;
+    const dodgeRoll = Math.random() * 100;
+
+    if (dodgeRoll < dodgeChance) {
+        finalHitType = "dodged";
+        console.log(`SERVER (Sesija ${sessionId}): Metak (ID: ${hitData.bulletId}) je izbjegnut od ${hitData.targetPlayerId}!`);
+    } else {
+        switch (hitData.hitType) {
+            case "topShield":
+                if (targetPlayerData.currentTopShield > 0) {
+                    targetPlayerData.currentTopShield--;
+                    console.log(`SERVER (Sesija ${sessionId}): ${hitData.targetPlayerId} pogođen TOP ŠTITOM. Preostalo: ${targetPlayerData.currentTopShield}`);
+                    finalHitType = "topShield";
+                } else {
+                    finalHitType = "body";
+                }
+                break;
+            case "leftShield":
+            case "rightShield":
+                if (targetPlayerData.currentSideShield > 0) {
+                    targetPlayerData.currentSideShield--;
+                    console.log(`SERVER (Sesija ${sessionId}): ${hitData.targetPlayerId} pogođen BOČNIM ŠTITOM. Preostalo: ${targetPlayerData.currentSideShield}`);
+                    finalHitType = "sideShield";
+                } else {
+                    finalHitType = "body";
+                }
+                break;
+            case "body":
+                finalHitType = "body";
+                break;
+            default:
+                console.warn(`SERVER (Sesija ${sessionId}): Nepoznat hitType: ${hitData.hitType}. Defaulting to body hit.`);
+                finalHitType = "body";
         }
-        if (hpChanged && targetPlayerData.characterStats.healthPoints <= 0) {
-          console.log(
-            `SERVER (Sesija ${sessionId}): Igrač ${hitData.targetPlayerId} je poražen (HP: ${targetPlayerData.characterStats.healthPoints})! Pobjednik je ${hitData.shooterPlayerId}.`
-          );
-          io.to(sessionId.toString()).emit("game_over", {
-            winner: hitData.shooterPlayerId,
+
+        if (finalHitType === "body") {
+            const armor = targetPlayerData.characterStats.armor || 0;
+            const damageReduction = Math.min(armor / 100, 0.8);
+            actualDamageDealt = Math.max(1, Math.round(damageToApply * (1 - damageReduction)));
+            targetPlayerData.currentHealth -= actualDamageDealt;
+            targetPlayerData.currentHealth = Math.max(0, targetPlayerData.currentHealth);
+            console.log(`SERVER (Sesija ${sessionId}): ${hitData.targetPlayerId} pogođen u TIJELO. Šteta: ${actualDamageDealt}, Novo HP: ${targetPlayerData.currentHealth}`);
+        }
+    }
+
+    const getCharacterDataForClient = (playerData) => ({
+      ...playerData.characterStats,
+      healthPoints: playerData.currentHealth,
+      topShield: playerData.currentTopShield,
+      sideShield: playerData.currentSideShield,
+      ammunition: playerData.currentAmmunition,
+    });
+
+    targetPlayerData.socket.emit("character_data_update", {
+        myCharacter: getCharacterDataForClient(targetPlayerData)
+    });
+    console.log(`SERVER (Sesija ${sessionId}): Emitiran character_data_update za ${targetPlayerData.socket.id}. Novo stanje: HP: ${targetPlayerData.currentHealth}, TS: ${targetPlayerData.currentTopShield}, SS: ${targetPlayerData.currentSideShield}`);
+
+    if (targetPlayerData.currentHealth <= 0) {
+        console.log(
+            `SERVER (Sesija ${sessionId}): Igrač ${hitData.targetPlayerId} je poražen (HP: ${targetPlayerData.currentHealth})! Pobjednik je ${shooterData.socket.id}.`
+        );
+        io.to(sessionId.toString()).emit("game_over", {
+            winner: shooterData.socket.id,
             loser: hitData.targetPlayerId,
-            message: `Igrač ${hitData.shooterPlayerId} je pobijedio!`,
-          });
-          if (session.timerInterval) clearInterval(session.timerInterval);
-          const deletedSessionId = sessionId;
-          const successfullyDeleted = gameSessions.delete(sessionId);
-          console.log(
+            message: `Igrač ${shooterData.socket.id} je pobijedio!`,
+        });
+        if (session.timerInterval) clearInterval(session.timerInterval);
+        stopAmmoRegen(session.player1Data);
+        stopAmmoRegen(session.player2Data);
+
+        const deletedSessionId = sessionId;
+        const successfullyDeleted = gameSessions.delete(sessionId);
+        console.log(
             `SERVER: Sesija ${deletedSessionId} ${
               successfullyDeleted
                 ? "USPJEŠNO UKLONJENA"
@@ -752,15 +944,9 @@ io.on("connection", (socket) => {
             } zbog kraja igre. Preostale sesije: [${Array.from(
               gameSessions.keys()
             ).join(", ")}]`
-          );
-        }
+        );
       }
-    } else {
-      console.error(
-        `SERVER (Sesija ${sessionId}): Nije moguće pronaći characterStats za pogođenog igrača ${hitData.targetPlayerId}`
-      );
-    }
-  });
+    });
 
   socket.on("player_defeated", ({ playerId }) => {
     const sessionIdString = Array.from(socket.rooms).find(
@@ -778,7 +964,7 @@ io.on("connection", (socket) => {
       }
       if (!gameSessions.has(sessionId)) {
         console.log(
-          `SERVER (Sesija ${sessionId}): Igrač ${playerId} javlja poraz, ali sesija je već uklonjena.`
+          `SERVER (Sesija ${sessionId}): Igrač ${playerId} javlja poraz, but the session is already removed.`
         );
         return;
       }
@@ -789,12 +975,19 @@ io.on("connection", (socket) => {
         playerId === session.player1Id
           ? session.player2Data
           : session.player1Data;
+
+      const defeatedPlayerData = (playerId === session.player1Id) ? session.player1Data : session.player2Data;
+      defeatedPlayerData.currentHealth = 0; 
+
       io.to(sessionId.toString()).emit("game_over", {
         winner: opponentData.socket.id,
         loser: playerId,
         message: `Igrač ${opponentData.socket.id} je pobijedio! (Igrač ${playerId} javio poraz)`,
       });
       if (session.timerInterval) clearInterval(session.timerInterval);
+      stopAmmoRegen(session.player1Data);
+      stopAmmoRegen(session.player2Data);
+
       const deletedSessionId = sessionId;
       const successfullyDeleted = gameSessions.delete(sessionId);
       console.log(

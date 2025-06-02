@@ -1,5 +1,4 @@
-// src/Pages/Online/Online.jsx
-import React, { useState, useEffect, useRef, useCallback } from "react"; // Dodan useCallback
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import io from "socket.io-client";
 import "./online.scss";
 import CharacterBuilder from "../../Components/CharacterBuilder/CharacterBuilder";
@@ -21,34 +20,36 @@ const PHASES = {
 
 const defaultCharacterData = {
   bodyColor: "#8E7AB5",
-  healthPoints: 100,
-  topShield: 0,
-  sideShield: 0,
+  healthPoints: 100, 
+  topShield: 0,      
+  sideShield: 0,     
   guns: 1,
   dodgeChance: 0,
   armor: 0,
   attackPoints: 20,
-  ammunition: 6,
+  ammunition: 6,    
   CAModifier: 0.0,
   attackSpeed: 1.0,
   bulletSpeed: 1.0,
   movemantSpeed: 1.0,
+  currentHealth: 100,
+  currentTopShield: 0,
+  currentSideShield: 0,
+  currentAmmunition: 6 * 1, // Max ammo for 1 gun
 };
 
 const Online = () => {
   const [phase, setPhase] = useState(PHASES.INITIALIZING);
   const [timeLeftInPhase, setTimeLeftInPhase] = useState(0);
-  const [characterData, setCharacterData] = useState(defaultCharacterData);
+  const [characterData, setCharacterData] = useState(defaultCharacterData); 
   const [gameMessage, setGameMessage] = useState("");
   const [incomingBullets, setIncomingBullets] = useState([]);
   const [sessionId, setSessionId] = useState(null);
-  const [currentGameId, setCurrentGameId] = useState(null); // Za resetiranje Playgrounda
+  const [currentGameId, setCurrentGameId] = useState(null);
 
   const socketRef = useRef(null);
-  // Novi state koji će služiti kao ključ za ponovnu inicijalizaciju useEffecta za socket
   const [socketReinitializationKey, setSocketReinitializationKey] = useState(0);
 
-  // Funkcija za slanje eventa serveru, sada koristi useCallback da se ne mijenja nepotrebno
   const sendEventToServer = useCallback(
     (eventName, data) => {
       if (
@@ -83,15 +84,13 @@ const Online = () => {
       }
     },
     [phase, sessionId]
-  ); // Ovisi o phase i sessionId
+  );
 
-  // useEffect za postavljanje i čišćenje socket konekcije i listenera
   useEffect(() => {
     console.log(
       `Online: Socket useEffect pokrenut (key: ${socketReinitializationKey})`
     );
 
-    // Ako postoji stari socket, diskonektiraj ga prije kreiranja novog
     if (socketRef.current) {
       console.log("Online: Čistim stari socket prije nove inicijalizacije.");
       socketRef.current.disconnect();
@@ -115,9 +114,6 @@ const Online = () => {
 
     newSocket.on("disconnect", (reason) => {
       console.log(`Online: Odspojen. Razlog: ${reason}`);
-      // Resetiraj sessionId i currentGameId ako je diskonekcija bila neočekivana tijekom igre
-      if (phase !== PHASES.GAME_OVER && phase !== PHASES.INITIALIZING) {
-      }
       if (reason === "io server disconnect") {
         setPhase(PHASES.ERROR_CONNECTING);
         setGameMessage("Odspojeni ste od strane servera.");
@@ -140,20 +136,18 @@ const Online = () => {
       "game_phase_update",
       ({ newPhase, duration, timeLeft, message, initialCharacterData }) => {
         console.log(
-          `Online: Server PHASE UPDATE -> Phase: ${newPhase}, Duration: ${duration}, TimeLeft: ${timeLeft}, Msg: ${message}, SessionId: ${sessionId}`
+          `Online: Server PHASE UPDATE -> Phase: ${newPhase}, Duration: ${duration}, TimeLeft: ${timeLeft}, Msg: ${message}`
         );
         setPhase(newPhase);
         setTimeLeftInPhase(timeLeft !== undefined ? timeLeft : duration || 0);
         if (message) setGameMessage(message);
+
         if (initialCharacterData && initialCharacterData.myCharacter) {
+          console.log(
+            `ONLINE (${newSocket.id}): Primljeni characterData od servera:`,
+            JSON.parse(JSON.stringify(initialCharacterData.myCharacter))
+          );
           setCharacterData(initialCharacterData.myCharacter);
-          if (initialCharacterData && initialCharacterData.myCharacter) {
-            console.log(
-              `ONLINE (${newSocket.id}): Primljeni initialCharacterData za postavljanje:`,
-              JSON.parse(JSON.stringify(initialCharacterData.myCharacter))
-            );
-            setCharacterData(initialCharacterData.myCharacter);
-          }
         } else if (
           newPhase === PHASES.BUILDER &&
           (!initialCharacterData || !initialCharacterData.myCharacter)
@@ -161,7 +155,14 @@ const Online = () => {
           console.warn(
             "Online: U builder fazi bez validnih initialCharacterData, koristeći postojeće/default."
           );
-          setCharacterData((prev) => ({ ...defaultCharacterData, ...prev }));
+          setCharacterData((prev) => ({
+            ...defaultCharacterData,
+            ...prev,
+            currentHealth: prev.healthPoints || defaultCharacterData.healthPoints,
+            currentTopShield: prev.topShield || defaultCharacterData.topShield,
+            currentSideShield: prev.sideShield || defaultCharacterData.sideShield,
+            currentAmmunition: (prev.ammunition || defaultCharacterData.ammunition) * (prev.guns || defaultCharacterData.guns),
+          }));
         }
       }
     );
@@ -172,6 +173,7 @@ const Online = () => {
 
     newSocket.on("character_data_update", (updatedCharacterData) => {
       if (updatedCharacterData.myCharacter) {
+        console.log("Online: Primljen character_data_update (live):", updatedCharacterData.myCharacter);
         setCharacterData(updatedCharacterData.myCharacter);
       }
     });
@@ -235,13 +237,12 @@ const Online = () => {
       );
     });
 
-    // Cleanup funkcija
     return () => {
       console.log(
         `Online: Cleanup useEffecta za socket (key: ${socketReinitializationKey}). Diskonektiram socket ${newSocket.id}`
       );
       newSocket.disconnect();
-      newSocket.removeAllListeners(); 
+      newSocket.removeAllListeners();
     };
   }, [socketReinitializationKey]);
 
@@ -250,34 +251,48 @@ const Online = () => {
       console.log(
         "Online: CharacterBuilder javlja da je karakter spreman. Šaljem serveru..."
       );
-      setCharacterData(builtCharacterData);
+      setCharacterData((prev) => ({
+        ...prev, 
+        ...builtCharacterData, 
+        healthPoints: builtCharacterData.healthPoints, 
+        topShield: builtCharacterData.topShield,       
+        sideShield: builtCharacterData.sideShield,     
+        ammunition: builtCharacterData.ammunition * builtCharacterData.guns, 
+      }));
       sendEventToServer("character_build_complete", builtCharacterData);
       setGameMessage("Karakter spreman. Čekam protivnika/potvrdu servera...");
     },
     [sendEventToServer]
-  ); 
+  );
 
   const handleStatUpdate = useCallback(
-    (statName, newZeroBasedLevel, currentStats) => {
-      setCharacterData(currentStats);
+    (statName, newZeroBasedLevel, currentStatsFromBuilder) => {
+      setCharacterData((prev) => ({
+        ...prev, 
+        ...currentStatsFromBuilder, 
+        healthPoints: currentStatsFromBuilder.healthPoints, 
+        topShield: currentStatsFromBuilder.topShield,
+        sideShield: currentStatsFromBuilder.sideShield,
+        ammunition: currentStatsFromBuilder.ammunition * currentStatsFromBuilder.guns,
+      }));
       sendEventToServer("character_stat_update", {
         statName,
         level: newZeroBasedLevel,
-        currentStats,
+        currentStats: currentStatsFromBuilder, 
       });
     },
     [sendEventToServer]
-  ); 
+  );
 
   const handlePlayAgain = () => {
     console.log("Online: Kliknuto 'Igraj Ponovno'. Resetiram stanje i socket.");
-  
+
     setPhase(PHASES.INITIALIZING);
     setGameMessage("Tražim novu igru...");
     setIncomingBullets([]);
-    setCharacterData(defaultCharacterData);
+    setCharacterData(defaultCharacterData); 
     setSessionId(null);
-    setCurrentGameId(null); 
+    setCurrentGameId(null);
     setTimeLeftInPhase(0);
 
     setSocketReinitializationKey((prevKey) => prevKey + 1);
@@ -366,7 +381,7 @@ const Online = () => {
 
         {phase === PHASES.PLAYGROUND &&
           characterData &&
-          currentGameId && ( 
+          currentGameId && (
             <motion.div
               key="playground"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -375,7 +390,7 @@ const Online = () => {
               transition={{ duration: 0.6 }}
             >
               <Playground
-                characterData={characterData}
+                characterData={characterData} 
                 timeLeftInRound={timeLeftInPhase}
                 sendEventToServer={sendEventToServer}
                 socketId={socketRef.current ? socketRef.current.id : null}
@@ -385,7 +400,7 @@ const Online = () => {
                     prev.filter((b) => b.id !== bulletId)
                   );
                 }}
-                gameId={currentGameId} 
+                gameId={currentGameId}
               />
             </motion.div>
           )}
